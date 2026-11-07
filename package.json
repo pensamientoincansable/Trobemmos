@@ -1,0 +1,20 @@
+{
+  "name": "trobemmos",
+  "version": "1.0.0",
+  "description": "Trobemmos — encuentra a tu gente. Ubicación compartida, círculos, alertas y seguridad vial, todo incluido y gratis.",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test server/*.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "leaflet": "^1.9.4"
+  },
+  "license": "Apache-2.0"
+}
