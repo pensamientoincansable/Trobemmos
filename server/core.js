@@ -75,10 +75,13 @@ export function geofenceTransitions({ userId, circleId, sample, places, previous
     const key = place.id;
     const inside = distanceMeters(sample, place) <= (place.radius || 200);
     const wasInside = Boolean(states[key]);
+    const firstSample = previousStates[key] === undefined;
+    // Siempre guardamos el estado, también cuando la primera muestra está
+    // fuera: si no, la llegada posterior se perdía sin generar alerta.
+    states[key] = inside;
     if (inside !== wasInside) {
-      states[key] = inside;
       // Primera muestra: se notifica solo la entrada, nunca una salida falsa.
-      if (!(previousStates[key] === undefined && !inside)) {
+      if (!(firstSample && !inside)) {
         events.push({
           type: inside ? 'place_entry' : 'place_exit',
           circleId,

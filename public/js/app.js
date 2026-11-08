@@ -28,7 +28,17 @@ async function boot() {
     S.capabilities = caps;
     const list = $('#auth-features');
     if (list) list.innerHTML = caps.features.slice(0, 8).map((f) => `<li><span>✓</span>${esc(f.name)}</li>`).join('');
-  } catch {}
+  } catch (err) {
+    // Sin backend la app no puede funcionar: avisamos en la propia pantalla de
+    // acceso en lugar de dejar al usuario sin explicación.
+    const errBox = $('#auth-error');
+    if (errBox) {
+      errBox.textContent = err.noBackend
+        ? 'No se pudo conectar con el servidor de Trobemmos. Arráncalo con «npm install && npm start» y abre http://localhost:3000. Si usas un servidor propio, añade ?api=https://tu-servidor a la URL.'
+        : `No se pudo cargar la configuración: ${err.message}`;
+      errBox.hidden = false;
+    }
+  }
   if (S.token) {
     try { await initApp(); }
     catch (e) { console.warn('Sesión no válida', e.message); setToken(null); showAuth(); }
@@ -163,6 +173,7 @@ S.renderCurrent = function renderCurrent() {
 /* ================================================================== */
 
 function ingestEvents(events = []) {
+  S.unread = events.filter((e) => !e.read).length;
   for (const e of events) {
     if (S.seenEvents.has(e.id)) continue;
     S.seenEvents.add(e.id);
@@ -177,6 +188,7 @@ function ingestEvents(events = []) {
 
 S.refresh = async function refresh() {
   if (!S.circleId) return;
+  if (!S.user) return;
   try {
     const [snap, ev, circles] = await Promise.all([
       api(`/api/circles/${S.circleId}`, { silent: true }),
@@ -224,9 +236,12 @@ function connectRealtime() {
   ws.onclose = () => {
     S.online = false;
     updateHeader();
+    if (!S.token) return;
     startPolling();
     if (S.wsRetry) clearTimeout(S.wsRetry);
-    S.wsRetry = setTimeout(() => { if (S.token && $('#app').classList.contains('hidden') === false) connectRealtime(); }, 6000);
+    S.wsRetry = setTimeout(() => {
+      if (S.token && !$('#app').classList.contains('hidden')) connectRealtime();
+    }, 6000);
   };
 }
 

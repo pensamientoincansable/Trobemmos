@@ -28,7 +28,9 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '3mb' }));
+// El chat admite imágenes de hasta 2,5 MB, que en base64 ocupan ~3,4 MB:
+// el límite debe cubrirlas o el navegador recibe un 500 al adjuntar una foto.
+app.use(express.json({ limit: '12mb' }));
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -604,11 +606,35 @@ app.use('/media', express.static(UPLOAD_DIR, { maxAge: '7d', immutable: false })
 app.use('/vendor', express.static(path.join(ROOT, 'public/vendor'), { maxAge: '1d' }));
 app.use(express.static(path.join(ROOT, 'public'), { extensions: ['html'] }));
 
-app.use((err, req, res, next) => {
-  console.error('[error]', err);
-  if (res.headersSent) return next(err);
-  res.status(500).json({ error: 'Error interno del servidor' });
+// Cualquier navegación desconocida devuelve la app (SPA), nunca una página en
+// blanco. Las rutas /api/* ya han respondido JSON antes de llegar aquí.
+app.get(/.*/, (req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/media/') || req.path.startsWith('/vendor/')) return next();
+  res.sendFile(path.join(ROOT, 'public', 'index.html'), (err) => { if (err) next(err); });
 });
+
+app.use((req, res, next) => {
+  // Cualquier /api/ sin ruta propia responde JSON (no el HTML de Express).
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Ruta de la API no encontrada' });
+  next();
+});
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.error('[error]', err);
+  const isBodyLimit = err.type === 'entity.too.large';
+  const message = isBodyLimit
+    ? 'La petición es demasiado grande. Las imágenes del chat pueden ocupar hasta 2,5 MB.'
+    : err.type === 'entity.parse.failed'
+      ? 'El cuerpo de la petición no es JSON válido.'
+      : status >= 500 ? 'Error interno del servidor' : err.message || 'Petición no válida';
+  res.status(isBodyLimit ? 413 : status).json({ error: message });
+});
+
+// Red de seguridad: un fallo inesperado no debe tumbar el servidor entero.
+process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err); });
+process.on('unhandledRejection', (err) => { console.error('[unhandledRejection]', err); });
 
 const server = createServer(app);
 const wss = new WebSocketServer({ noServer: true });
@@ -645,17 +671,36 @@ setInterval(() => {
 setInterval(() => closeStaleTrips(broadcast), 30000).unref();
 setInterval(() => pruneRetention(), 6 * 3600000).unref();
 
+server.on('error', (err) => {
+  // Causa habitual: ya hay otro proceso usando el puerto. Antes el proceso
+  // moría con una traza críptica; ahora se explica y se ofrece una salida.
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n[trobemmos] El puerto ${PORT} ya está en uso.`);
+    console.error('[trobemmos] Cierra la otra instancia o arranca en otro puerto:');
+    console.error(`[trobemmos]   PORT=${PORT + 1} npm start\n`);
+  } else if (err.code === 'EACCES') {
+    console.error(`\n[trobemmos] No hay permisos para escuchar en el puerto ${PORT}. Prueba con PORT=3001 npm start\n`);
+  } else {
+    console.error('[trobemmos] Error del servidor:', err);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, HOST, () => {
   ensureDemo();
   startDemoSimulation(broadcast);
-  console.log(`Trobemmos escuchando en http://${HOST}:${PORT}`);
+  console.log(`Trobemmos escuchando en http://localhost:${PORT} (interfaz y API)`);
   console.log(`Datos en ${DATA_DIR}`);
   console.log(`Demo: ${demoCredentials().email} / ${demoCredentials().password}`);
 });
 
+let shuttingDown = false;
 function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   stopDemoSimulation();
-  flush();
+  try { flush(); } catch (e) { console.error('[trobemmos] no se pudo guardar el estado:', e.message); }
+  for (const [ws] of clients) { try { ws.close(); } catch {} }
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 2000).unref();
 }

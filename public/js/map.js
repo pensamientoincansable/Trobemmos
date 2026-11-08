@@ -82,7 +82,26 @@ function drawTile(canvas, coords) {
   }
 }
 
-const AtlasLayer = L.GridLayer.extend({
+const hasLeaflet = () => typeof window !== 'undefined' && typeof window.L !== 'undefined';
+
+/** Sustituto inerte del mapa: la app sigue funcionando si Leaflet no carga. */
+function stubMap(container, reason) {
+  const message = reason || 'El mapa interactivo no está disponible ahora mismo.';
+  if (container) {
+    container.innerHTML = `<div style="height:100%;min-height:280px;display:grid;place-items:center;padding:24px;text-align:center;background:#eef1f6;color:#6c7891;font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif">
+      <div><strong style="display:block;color:#16203a;font-size:15px;margin-bottom:6px">Mapa no disponible</strong>${message}</div></div>`;
+  }
+  const noop = () => {};
+  const self = {
+    map: { on: noop, once: noop, remove: noop, invalidateSize: noop, flyTo: noop, fitBounds: noop, hasLayer: () => false, removeLayer: noop, addLayer: noop },
+    setMembers: noop, setPlaces: noop, setTrail: noop, setTrails: noop, setReplayPoint: noop,
+    fitAll: noop, focus: noop, setBasemap: noop, setPickMode: noop,
+    invalidate: noop, destroy: () => { if (container) container.innerHTML = ''; }, unavailable: true,
+  };
+  return self;
+}
+
+const AtlasLayer = hasLeaflet() && L.GridLayer.extend({
   createTile(coords, done) {
     const tile = document.createElement('canvas');
     tile.width = TILE;
@@ -99,6 +118,8 @@ function esc(s) {
 }
 
 export function createMap(container, { onPick = null, center = [40.4203, -3.7065], zoom = 14 } = {}) {
+  if (!hasLeaflet()) return stubMap(container, 'Revisa que /vendor/leaflet/leaflet.js se sirva correctamente.');
+  try {
   const map = L.map(container, { zoomControl: false, attributionControl: true, preferCanvas: true }).setView(center, zoom);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
   const atlas = new AtlasLayer({ tileSize: TILE, attribution: 'Atlas Trobemmos · sin servicios externos', maxZoom: 19, minZoom: 3 });
@@ -251,4 +272,8 @@ export function createMap(container, { onPick = null, center = [40.4203, -3.7065
     setBasemap, setPickMode, invalidate: () => map.invalidateSize(),
     destroy: () => map.remove(),
   };
+  } catch (err) {
+    console.warn('No se pudo iniciar Leaflet:', err);
+    return stubMap(container, String(err && err.message ? err.message : err));
+  }
 }

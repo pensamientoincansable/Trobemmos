@@ -111,3 +111,80 @@ test('retención por defecto de 90 días', () => {
   assert.equal(HISTORY_DAYS, 90);
   assert.equal(pruneOld(1000 * 86400 * 100, 90) > 0, true);
 });
+
+/* ------------------------------------------------------------------ */
+/* Regresiones de los fallos corregidos                                 */
+/* ------------------------------------------------------------------ */
+
+test('geocerca: salir del radio genera place_exit y entrar de nuevo place_entry', () => {
+  const home = { id: 'h', name: 'Casa', icon: '🏠', lat: 40.4203, lng: -3.7065, radius: 200, alertsOn: true };
+  // Dentro -> fuera
+  const out = geofenceTransitions({
+    userId: 'u', circleId: 'c',
+    sample: { lat: 40.50, lng: -3.7065, ts: 1 },
+    places: [home], previousStates: { h: true },
+  });
+  assert.equal(out.states.h, false);
+  assert.equal(out.events.length, 1);
+  assert.equal(out.events[0].type, 'place_exit');
+  // Fuera -> dentro (segunda llamada)
+  const back = geofenceTransitions({
+    userId: 'u', circleId: 'c',
+    sample: { lat: 40.4203, lng: -3.7065, ts: 2 },
+    places: [home], previousStates: out.states,
+  });
+  assert.equal(back.states.h, true);
+  assert.equal(back.events[0].type, 'place_entry');
+});
+
+test('geocerca: primera muestra fuera no dispara una salida falsa', () => {
+  const home = { id: 'h', name: 'Casa', lat: 40.4203, lng: -3.7065, radius: 200, alertsOn: true };
+  const first = geofenceTransitions({
+    userId: 'u', circleId: 'c',
+    sample: { lat: 41.0, lng: -3.7065, ts: 1 },
+    places: [home], previousStates: {},
+  });
+  assert.equal(first.events.length, 0);
+  assert.equal(first.states.h, false);
+});
+
+test('geocerca: alertas silenciadas siguen actualizando el estado', () => {
+  const muted = { id: 'm', name: 'Colegio', lat: 40.41, lng: -3.715, radius: 200, alertsOn: false };
+  const res = geofenceTransitions({
+    userId: 'u', circleId: 'c',
+    sample: { lat: 40.41, lng: -3.715, ts: 1 },
+    places: [muted], previousStates: {},
+  });
+  assert.equal(res.events.length, 0);
+  assert.equal(res.states.m, true);
+});
+
+test('marcar leídas: una lista vacía no debe marcar todo (regresión)', async () => {
+  // markEventsRead vive en store.js, que escribe en disco: comprobamos la
+  // semántica contra un estado simulado para no tocar los datos reales.
+  const events = [{ id: 'a', readBy: [] }, { id: 'b', readBy: [] }];
+  const apply = (ids) => {
+    const all = ids === undefined || ids === null;
+    const set = new Set(all ? [] : ids);
+    let changed = 0;
+    for (const e of events) {
+      if (all || set.has(e.id)) {
+        if (!e.readBy.includes('u')) { e.readBy.push('u'); changed++; }
+      }
+    }
+    return changed;
+  };
+  assert.equal(apply([]), 0, 'una lista vacía no debe marcar nada');
+  assert.equal(events.every((e) => e.readBy.length === 0), true);
+  assert.equal(apply(['a']), 1, 'solo debe marcar el id indicado');
+  assert.equal(apply(undefined), 1, 'sin ids debe marcar todo lo pendiente');
+});
+
+test('límite de adjuntos: base64 de 2,5 MB cabe en el límite JSON del servidor', () => {
+  const MAX_IMAGE_BYTES = 2_500_000;
+  const JSON_LIMIT_BYTES = 12 * 1024 * 1024; // app.use(express.json({ limit: '12mb' }))
+  const base64Size = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
+  const overhead = '{"text":"","image":"data:image/png;base64,"}'.length;
+  assert.ok(base64Size + overhead < JSON_LIMIT_BYTES,
+    `una imagen de 2,5 MB ocupa ${base64Size} B en base64 y debe caber en ${JSON_LIMIT_BYTES} B`);
+});

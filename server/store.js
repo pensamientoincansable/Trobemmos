@@ -13,7 +13,13 @@ export const DATA_DIR = process.env.TROBEMMOS_DATA_DIR || path.join(ROOT, 'data'
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+try {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+} catch (err) {
+  console.error(`[store] No se pudo crear el directorio de datos ${DATA_DIR}: ${err.message}`);
+  console.error('[store] Define TROBEMMOS_DATA_DIR apuntando a una carpeta con permisos de escritura.');
+  process.exit(1);
+}
 
 const emptyState = () => ({
   version: 1,
@@ -31,10 +37,16 @@ const emptyState = () => ({
 });
 
 function load() {
+  if (!fs.existsSync(STATE_FILE)) return emptyState();
   try {
     const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    if (!parsed || typeof parsed !== 'object') throw new Error('estado no válido');
     return { ...emptyState(), ...parsed };
-  } catch {
+  } catch (err) {
+    // No perdemos datos en silencio: apartamos el archivo dañado y seguimos.
+    const broken = `${STATE_FILE}.corrupt-${Date.now()}`;
+    try { fs.renameSync(STATE_FILE, broken); } catch {}
+    console.error(`[store] state.json no se pudo leer (${err.message}). Se ha guardado una copia en ${broken} y se empieza de cero.`);
     return emptyState();
   }
 }
@@ -51,9 +63,27 @@ export function save() {
 }
 
 export function flush() {
+  // Escritura atómica: si el proceso muere a mitad, el state.json anterior
+  // sigue siendo válido en lugar de quedar truncado.
   const tmp = `${STATE_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state));
-  fs.renameSync(tmp, STATE_FILE);
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify(state));
+    fs.renameSync(tmp, STATE_FILE);
+  } catch (err) {
+    console.error('[store] no se pudo guardar el estado:', err.message);
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+  }
+}
+
+/** Copia de seguridad del estado (se usa al arrancar, antes de sobrescribir). */
+export function backupState() {
+  try {
+    if (!fs.existsSync(STATE_FILE)) return null;
+    const backup = `${STATE_FILE}.bak`;
+    fs.copyFileSync(STATE_FILE, backup);
+    return backup;
+  } catch { return null; }
 }
 
 process.on('SIGTERM', () => { try { flush(); } catch {} });
@@ -218,10 +248,13 @@ export function eventsForUser(userId, since = 0) {
 }
 
 export function markEventsRead(userId, ids) {
-  const set = new Set(ids || []);
+  // `ids === undefined` -> todas (lo pide «Marcar leídas»). Una lista vacía no
+  // debe marcar nada: antes convertía en leída toda la bandeja por error.
+  const all = ids === undefined || ids === null;
+  const set = new Set(all ? [] : ids);
   let changed = 0;
   for (const e of state.events) {
-    if (!set.size || set.has(e.id)) {
+    if (all || set.has(e.id)) {
       e.readBy ||= [];
       if (!e.readBy.includes(userId)) { e.readBy.push(userId); changed++; }
     }

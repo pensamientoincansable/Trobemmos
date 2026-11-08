@@ -37,12 +37,26 @@ npm start
 
 Requiere Node.js ≥ 20 (probado en Node 22). No hay base de datos ni servicios externos: los datos se guardan en `data/state.json` (fuera de Git).
 
+> **Importante:** Trobemmos es una aplicación **con servidor**. Abrir el `index.html` con doble clic (o publicarlo solo como sitio estático) no es suficiente: el mapa en vivo, las cuentas, el chat y las alertas necesitan `npm start`. Si abres la app sin backend, la propia interfaz lo detecta y te lo explica con un aviso.
+
+### Publicar la interfaz aparte (opcional)
+
+La interfaz puede servirse como sitio estático (por ejemplo GitHub Pages) apuntando a un backend real:
+
+```
+https://usuario.github.io/Trobemmos/public/?api=https://mi-servidor-trobemmos
+```
+
+También se puede fijar con `window.TROBEMMOS_API = 'https://mi-servidor'` antes de cargar `js/ctx.js`. El parámetro `?api=` se recuerda en el navegador. Para que GitHub Pages publique el sitio estático, el repositorio incluye un `index.html` en la raíz que redirige a `public/`, y los archivos `.nojekyll` necesarios.
+
 ```bash
 npm test           # tests unitarios de geocercas, conducción, impactos e informes
 npm run dev        # reinicio automático con --watch
 ```
 
 Variables de entorno: `PORT` (3000), `HOST` (`0.0.0.0`), `TROBEMMOS_DATA_DIR` (directorio de datos).
+
+Si el puerto 3000 está ocupado, el servidor lo indica y sugiere `PORT=3001 npm start`. Si `data/state.json` estuviera corrupto, se aparta como `state.json.corrupt-<fecha>` en lugar de perder los datos en silencio.
 
 ### Modo demostración
 
