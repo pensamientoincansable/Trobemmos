@@ -2,7 +2,7 @@
 import {
   S, api, esc, icon, toast, openModal, closeModal, confirmModal, navigate,
   timeHM, timeAgo, dateShort, dateLong, durationText, round1, copyText,
-  avatarHtml, eventIcon, EMOJIS, PLACE_EMOJIS,
+  avatarHtml, eventIcon, EMOJIS, PLACE_EMOJIS, apiUrl,
 } from './ctx.js';
 import { createMap } from './map.js';
 
@@ -880,7 +880,7 @@ function mountAjustes() {
   });
   document.getElementById('set-export').addEventListener('click', async () => {
     try {
-      const res = await fetch('/api/me/export', { headers: { Authorization: `Bearer ${S.token}` } });
+      const res = await fetch(apiUrl('/api/me/export'), { headers: { Authorization: `Bearer ${S.token}` } });
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

@@ -77,19 +77,75 @@ export function setCircleId(id) {
   else storage.del('trobemmos_circle');
 }
 
+/**
+ * URL del backend. Por defecto es el mismo origen que sirve la interfaz, pero
+ * se puede apuntar a otro servidor con `window.TROBEMMOS_API` o con el
+ * parámetro `?api=https://mi-servidor` (útil si la interfaz se sirve como
+ * página estática, por ejemplo en GitHub Pages).
+ */
+export function apiBase() {
+  const fromQuery = new URLSearchParams(location.search).get('api');
+  if (fromQuery) { try { storage.set('trobemmos_api', fromQuery.replace(/\/+$/, '')); } catch {} }
+  const configured = (typeof window !== 'undefined' && window.TROBEMMOS_API) || storage.get('trobemmos_api') || '';
+  return configured ? String(configured).replace(/\/+$/, '') : '';
+}
+
+export function apiUrl(path) {
+  const base = apiBase();
+  if (!base) return path;
+  return path.startsWith('/api') ? base + path : path;
+}
+
+/** Aviso único cuando la interfaz está publicada sin su servidor. */
+function warnNoBackend() {
+  if (S.noBackendWarned) return;
+  S.noBackendWarned = true;
+  toast(
+    'Falta el servidor de Trobemmos',
+    'Esta página está publicada como sitio estático y no puede guardar datos. Ejecuta «npm install && npm start» y abre http://localhost:3000, o indica la URL del servidor con ?api=https://tu-servidor.',
+    'critical',
+    15000,
+  );
+}
+
 export async function api(path, options = {}) {
   const { method = 'GET', body, silent = false } = options;
   const headers = {};
   if (S.token) headers.Authorization = `Bearer ${S.token}`;
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const hasBody = body !== undefined && method !== 'GET' && method !== 'HEAD';
+  if (hasBody) headers['Content-Type'] = 'application/json';
+  let res;
+  try {
+    res = await fetch(apiUrl(path), {
+      method,
+      headers,
+      body: hasBody ? JSON.stringify(body) : undefined,
+      // Necesario para que la sesión funcione si el backend está en otro origen.
+      credentials: apiBase() ? 'include' : 'same-origin',
+    });
+  } catch (cause) {
+    const err = new Error('No se pudo conectar con el servidor de Trobemmos. Comprueba que está en marcha (npm start).');
+    err.status = 0;
+    err.noBackend = true;
+    err.cause = cause;
+    if (!silent) warnNoBackend();
+    throw err;
+  }
   let data;
-  try { data = await res.json(); } catch { data = {}; }
+  const text = await res.text().catch(() => '');
+  try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
   if (!res.ok) {
+    // Un HTML en lugar de JSON casi siempre significa que la petición llegó a
+    // un servidor estático (404 de GitHub Pages, etc.) y no al backend.
+    const looksStatic = !data.error && /<html|<!doctype/i.test(text.slice(0, 200));
+    if (looksStatic) warnNoBackend();
     if (res.status === 401 && S.onUnauthorized) S.onUnauthorized();
-    const err = new Error(data.error || `Error ${res.status}`);
+    const err = new Error(looksStatic
+      ? 'Esta página no está conectada al servidor de Trobemmos.'
+      : data.error || `Error ${res.status}`);
     err.status = res.status;
-    if (!silent) toast('No se pudo completar la acción', err.message, 'critical');
+    err.noBackend = looksStatic;
+    if (!silent && !looksStatic) toast('No se pudo completar la acción', err.message, 'critical');
     throw err;
   }
   return data;
